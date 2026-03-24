@@ -12,15 +12,18 @@ import (
 )
 
 type Server struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Command     string    `json:"command"`
-	Args        []string  `json:"args"`
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Transport   string            `json:"transport"`   // stdio | sse | http
+	Install     map[string]string `json:"install"`     // e.g. {"type":"npx","package":"..."}
+	Command     string            `json:"command"`
+	Args        []string          `json:"args"`
 	Env         map[string]string `json:"env"`
-	Tags        []string  `json:"tags"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Tags        []string          `json:"tags"`
+	Platforms   []string          `json:"platforms"`   // linux, darwin, windows
+	CreatedAt   time.Time         `json:"created_at"`
+	UpdatedAt   time.Time         `json:"updated_at"`
 }
 
 type Token struct {
@@ -41,7 +44,7 @@ func NewStore(db *sql.DB) *Store {
 // Servers
 
 func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, command, args, env, tags, created_at, updated_at FROM servers ORDER BY name`)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at FROM servers ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -49,13 +52,15 @@ func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 	var servers []Server
 	for rows.Next() {
 		var srv Server
-		var argsJSON, envJSON, tagsJSON string
-		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Command, &argsJSON, &envJSON, &tagsJSON, &srv.CreatedAt, &srv.UpdatedAt); err != nil {
+		var installJSON, argsJSON, envJSON, tagsJSON, platformsJSON string
+		if err := rows.Scan(&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt); err != nil {
 			return nil, err
 		}
+		_ = json.Unmarshal([]byte(installJSON), &srv.Install)
 		_ = json.Unmarshal([]byte(argsJSON), &srv.Args)
 		_ = json.Unmarshal([]byte(envJSON), &srv.Env)
 		_ = json.Unmarshal([]byte(tagsJSON), &srv.Tags)
+		_ = json.Unmarshal([]byte(platformsJSON), &srv.Platforms)
 		servers = append(servers, srv)
 	}
 	return servers, rows.Err()
@@ -63,18 +68,20 @@ func (s *Store) ListServers(ctx context.Context) ([]Server, error) {
 
 func (s *Store) GetServer(ctx context.Context, id string) (*Server, error) {
 	var srv Server
-	var argsJSON, envJSON, tagsJSON string
-	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, command, args, env, tags, created_at, updated_at FROM servers WHERE id = ?`, id).Scan(
-		&srv.ID, &srv.Name, &srv.Description, &srv.Command, &argsJSON, &envJSON, &tagsJSON, &srv.CreatedAt, &srv.UpdatedAt)
+	var installJSON, argsJSON, envJSON, tagsJSON, platformsJSON string
+	err := s.db.QueryRowContext(ctx, `SELECT id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at FROM servers WHERE id = ?`, id).Scan(
+		&srv.ID, &srv.Name, &srv.Description, &srv.Transport, &installJSON, &srv.Command, &argsJSON, &envJSON, &tagsJSON, &platformsJSON, &srv.CreatedAt, &srv.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	_ = json.Unmarshal([]byte(installJSON), &srv.Install)
 	_ = json.Unmarshal([]byte(argsJSON), &srv.Args)
 	_ = json.Unmarshal([]byte(envJSON), &srv.Env)
 	_ = json.Unmarshal([]byte(tagsJSON), &srv.Tags)
+	_ = json.Unmarshal([]byte(platformsJSON), &srv.Platforms)
 	return &srv, nil
 }
 
@@ -82,21 +89,25 @@ func (s *Store) CreateServer(ctx context.Context, srv *Server) error {
 	srv.ID = newID()
 	srv.CreatedAt = time.Now().UTC()
 	srv.UpdatedAt = srv.CreatedAt
+	installJSON, _ := json.Marshal(srv.Install)
 	argsJSON, _ := json.Marshal(srv.Args)
 	envJSON, _ := json.Marshal(srv.Env)
 	tagsJSON, _ := json.Marshal(srv.Tags)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO servers (id, name, description, command, args, env, tags, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)`,
-		srv.ID, srv.Name, srv.Description, srv.Command, string(argsJSON), string(envJSON), string(tagsJSON), srv.CreatedAt, srv.UpdatedAt)
+	platformsJSON, _ := json.Marshal(srv.Platforms)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO servers (id, name, description, transport, install, command, args, env, tags, platforms, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		srv.ID, srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.CreatedAt, srv.UpdatedAt)
 	return err
 }
 
 func (s *Store) UpdateServer(ctx context.Context, srv *Server) error {
 	srv.UpdatedAt = time.Now().UTC()
+	installJSON, _ := json.Marshal(srv.Install)
 	argsJSON, _ := json.Marshal(srv.Args)
 	envJSON, _ := json.Marshal(srv.Env)
 	tagsJSON, _ := json.Marshal(srv.Tags)
-	_, err := s.db.ExecContext(ctx, `UPDATE servers SET name=?, description=?, command=?, args=?, env=?, tags=?, updated_at=? WHERE id=?`,
-		srv.Name, srv.Description, srv.Command, string(argsJSON), string(envJSON), string(tagsJSON), srv.UpdatedAt, srv.ID)
+	platformsJSON, _ := json.Marshal(srv.Platforms)
+	_, err := s.db.ExecContext(ctx, `UPDATE servers SET name=?, description=?, transport=?, install=?, command=?, args=?, env=?, tags=?, platforms=?, updated_at=? WHERE id=?`,
+		srv.Name, srv.Description, srv.Transport, string(installJSON), srv.Command, string(argsJSON), string(envJSON), string(tagsJSON), string(platformsJSON), srv.UpdatedAt, srv.ID)
 	return err
 }
 
