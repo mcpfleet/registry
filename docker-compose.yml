@@ -1,0 +1,32 @@
+version: "3.9"
+
+services:
+  registry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcpfleet/registry:latest
+    container_name: mcpfleet-registry
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    volumes:
+      - registry-data:/data
+    environment:
+      - DATABASE_URL=/data/registry.db
+      - PORT=8080
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  registry-data:
+    driver: local
