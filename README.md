@@ -1,13 +1,74 @@
-# registry
+<div align="center">
 
-REST API backend for [mcpfleet](https://github.com/mcpfleet/mcpfleet) — stores MCP server definitions, manages auth tokens.
+# mcpfleet-registry
+
+**REST API backend for mcpfleet — stores MCP server definitions and manages auth tokens**
+
+[![CI](https://github.com/mcpfleet/mcpfleet-registry/actions/workflows/ci.yml/badge.svg)](https://github.com/mcpfleet/mcpfleet-registry/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/badge/go-1.22-blue)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+[CLI tool](https://github.com/mcpfleet/mcpfleet) · [API docs (Swagger)](#api-docs) · [Report a bug](https://github.com/mcpfleet/mcpfleet-registry/issues)
+
+</div>
+
+---
+
+## Overview
+
+`mcpfleet-registry` is the server-side component of the mcpfleet ecosystem. It provides a REST API for storing, retrieving, and managing MCP server definitions. It's designed to be self-hosted — run it on your own machine or VPS.
 
 ## Stack
 
-- **Go 1.22** + **[Huma v2](https://huma.rocks/)** (OpenAPI 3.1, auto-docs)
-- **SQLite** (WAL mode, zero external dependencies)
-- **chi** router
-- Multi-stage **Docker** build (~20 MB final image)
+| Component | Technology |
+|-----------|------------|
+| Language | Go 1.22 |
+| HTTP framework | [Huma v2](https://huma.rocks/) (OpenAPI 3.1, auto-docs) |
+| Router | [chi v5](https://github.com/go-chi/chi) |
+| Database | SQLite (WAL mode, zero external dependencies) |
+| Migrations | [golang-migrate](https://github.com/golang-migrate/migrate) |
+| Container | Multi-stage Docker build (~20 MB final image) |
+
+## Quick start
+
+### Docker Compose (recommended)
+
+```bash
+git clone https://github.com/mcpfleet/mcpfleet-registry
+cd mcpfleet-registry
+docker compose up -d
+```
+
+The API will be available at `http://localhost:8080`.
+
+### Manual
+
+```bash
+git clone https://github.com/mcpfleet/mcpfleet-registry
+cd mcpfleet-registry
+go mod tidy
+go run ./cmd/registry
+```
+
+## First-time setup
+
+Before authentication is enabled, bootstrap your first admin token directly on the server:
+
+```bash
+# Create the first token (run once on first startup)
+curl -X POST http://localhost:8080/bootstrap \
+  -H 'Content-Type: application/json' \
+  -d '{"name": "admin"}'
+# => {"token": "mcp_xxxxxxxxxxxx"}
+```
+
+Then use this token with the mcpfleet CLI:
+
+```bash
+export MCPFLEET_REGISTRY_URL=http://localhost:8080
+mcpfleet auth login
+# enter your token when prompted
+```
 
 ## Authentication
 
@@ -22,84 +83,68 @@ Authorization: Bearer mcp_<token>
 - `GET /docs` — Swagger UI
 - `GET /openapi.json` — OpenAPI schema
 
-**First-time setup** — bootstrap your first token directly on the server:
+## API reference
 
-```bash
-# Before auth is enabled, create the first token
-curl -X POST http://localhost:8080/v1/tokens \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"admin"}'
-
-# Response (save the token — shown only once):
-# {"id":"...","name":"admin","token":"mcp_..."}
-```
-
-After the first token exists, all subsequent requests require `Authorization: Bearer mcp_...`.
-
-> **Note:** If you need to bootstrap with auth already enforced, set `BOOTSTRAP_TOKEN` env (see below).
-
-## API
+### Servers
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/v1/servers` | List all MCP servers |
-| POST | `/v1/servers` | Create MCP server |
-| GET | `/v1/servers/{id}` | Get server by ID |
-| PUT | `/v1/servers/{id}` | Update server |
-| DELETE | `/v1/servers/{id}` | Delete server |
-| GET | `/v1/tokens` | List auth tokens |
-| POST | `/v1/tokens` | Create auth token |
-| DELETE | `/v1/tokens/{id}` | Delete token |
+| `GET` | `/v1/servers` | List all MCP servers |
+| `GET` | `/v1/servers/{name}` | Get a server by name |
+| `POST` | `/v1/servers` | Create a new server |
+| `PUT` | `/v1/servers/{name}` | Update an existing server |
+| `DELETE` | `/v1/servers/{name}` | Delete a server |
 
-Interactive docs at `/docs` when running.
+### Auth tokens
 
-## Running
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/v1/tokens` | List all tokens |
+| `POST` | `/v1/tokens` | Create a new token |
+| `DELETE` | `/v1/tokens/{id}` | Revoke a token |
 
-### Docker Compose (recommended for VPS)
+## API docs
+
+When running, interactive API docs are available at:
+- **Swagger UI**: `http://localhost:8080/docs`
+- **OpenAPI JSON**: `http://localhost:8080/openapi.json`
+
+## Configuration
+
+| Environment variable | Default | Description |
+|----------------------|---------|-------------|
+| `PORT` | `8080` | HTTP listen port |
+| `DB_PATH` | `./registry.db` | Path to SQLite database file |
+| `LOG_LEVEL` | `info` | Log level (debug/info/warn/error) |
+
+## Development
 
 ```bash
-docker compose up -d
-```
-
-Data persists in a named volume `registry-data`. Override port:
-
-```bash
-PORT=9000 docker compose up -d
-```
-
-### Local (requires Go 1.22+ and CGO)
-
-```bash
+git clone https://github.com/mcpfleet/mcpfleet-registry
+cd mcpfleet-registry
+go mod tidy
+go test ./...
 go run ./cmd/registry
 ```
 
-## Environment Variables
+## Docker
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8080` | Listen port |
-| `DATABASE_URL` | `./registry.db` | SQLite file path |
+```bash
+# Build image
+docker build -t mcpfleet-registry .
 
-## Server Object
-
-```json
-{
-  "id": "uuid",
-  "name": "brave-search",
-  "description": "Brave Search MCP server",
-  "command": "npx",
-  "args": ["-y", "@modelcontextprotocol/server-brave-search"],
-  "env": {"BRAVE_API_KEY": "sk-..."},
-  "tags": ["search", "web"],
-  "created_at": "2025-01-01T00:00:00Z",
-  "updated_at": "2025-01-01T00:00:00Z"
-}
+# Run with persistent database
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd)/data:/data \
+  -e DB_PATH=/data/registry.db \
+  mcpfleet-registry
 ```
 
-## Auth Tokens
+## Contributing
 
-Tokens are created via `POST /v1/tokens`. The raw token (prefixed `mcp_`) is returned **only once** — only a SHA-256 hash is stored. Pass it to `mcpfleet` CLI via `mcpfleet auth`.
+Pull requests are welcome! Please open an issue first to discuss major changes.
 
 ## License
 
-MIT
+[MIT](LICENSE)
